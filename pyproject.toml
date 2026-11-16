@@ -1,0 +1,63 @@
+[project]
+name = "fuzz-forge"
+version = "0.1.0"
+description = "AI-powered API fuzzing library that intelligently generates security tests from OpenAPI specs using local LLMs"
+authors = [{name = "Fuzz Forge Maintainers", email = "maintainers@fuzzforge.dev"}]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.5.0",
+    "ollama>=0.1.8",
+    "prance>=23.6.21",
+    "jinja2>=3.1.2",
+    "typer>=0.9.0",
+    "rich>=13.7.0",
+    "python-dotenv>=1.0.0",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+]
+
+[project.scripts]
+fuzzforge = "fuzzforge.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/fuzzforge/fuzz-forge"
+Repository = "https://github.com/fuzzforge/fuzz-forge"
+Documentation = "https://github.com/fuzzforge/fuzz-forge#readme"
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q --tb=short"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
