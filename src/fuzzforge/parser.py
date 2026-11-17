@@ -2,6 +2,8 @@
 
 Converts YAML/JSON OpenAPI documents into a structured APISpec with
 extracted endpoints, component schemas, security schemes and server URLs.
+Now extracts per-operation security requirements for first-class OAuth2
+and API-key support.
 """
 
 from __future__ import annotations
@@ -98,6 +100,7 @@ class OpenAPIParser:
                         "example": example,
                         "operationId": operation.get("operationId"),
                         "tags": operation.get("tags", []),
+                        "security": operation.get("security", []),  # first-class auth support
                     })
 
             # Schemas

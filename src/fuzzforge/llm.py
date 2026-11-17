@@ -2,6 +2,7 @@
 
 Uses Ollama to turn an APISpec into a list of intelligent TestCase
 objects that understand the purpose of each endpoint.
+Now includes security scheme information in prompts.
 """
 
 from __future__ import annotations
@@ -85,6 +86,7 @@ class LLMClient:
                                 "description", "LLM-generated contextual security test"
                             ),
                             risk_potential=item.get("risk_potential", "medium"),
+                            security=item.get("security", {}),
                         )
                     )
                 except Exception:  # noqa: PERF203 - continue on single bad item
@@ -114,10 +116,20 @@ class LLMClient:
         schema_names = list(spec.schemas.keys())[:6]
         schema_line = f"Schemas: {', '.join(schema_names)}" if schema_names else "No schemas defined."
 
+        security_info = ""
+        if spec.security_schemes:
+            security_info = (
+                "\nSecurity Schemes:\n"
+                + json.dumps(spec.security_schemes, indent=2)
+                + "\nUse these schemes when generating tests. For auth_bypass tests "
+                "omit or use invalid credentials. Include a 'security' key when relevant."
+            )
+
         return f"""Analyze the following API and generate {count} high-value security test cases.
 
 API: {spec.title} v{spec.version}
 Servers: {', '.join(spec.servers)}
+{security_info}
 
 Endpoints:
 {chr(10).join(endpoint_lines)}
@@ -126,7 +138,7 @@ Endpoints:
 
 Focus on:
 • Injection (XSS, SQLi, command injection)
-• Authentication / authorization bypass
+• Authentication / authorization bypass (respecting the defined OAuth2 and apiKey schemes)
 • IDOR and broken access control
 • Business logic flaws that respect the endpoint's purpose
 
@@ -136,9 +148,10 @@ Return a JSON array of objects. Each object must contain exactly these keys:
 - path (string)
 - payload (object)
 - headers (object)
-- tags (array of strings e.g. ["xss", "injection"])
+- tags (array of strings e.g. ["xss", "injection", "auth_bypass"])
 - description (string explaining why the test matters)
 - risk_potential ("low", "medium", "high", or "critical")
+- security (object, optional)
 
 Output ONLY the JSON array. No markdown, no extra text.
 """
@@ -185,6 +198,7 @@ Output ONLY the JSON array. No markdown, no extra text.
                     tags=["injection", "xss", "fallback"],
                     description="Fallback test case (LLM unavailable)",
                     risk_potential="medium",
+                    security=ep.get("security", {}),
                 )
             )
         return tests

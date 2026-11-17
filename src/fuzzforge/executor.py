@@ -2,13 +2,14 @@
 
 Handles dry-run simulation, async HTTP requests via httpx, rate limiting,
 host allowlisting, and produces TestResult objects with risk heuristics.
+Now includes first-class support for OAuth2 and API-key schemes.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
@@ -25,6 +26,9 @@ class TestExecutor:
         rate_limit_rps: float = 5.0,
         allowed_hosts: Optional[List[str]] = None,
         base_url: Optional[str] = None,
+        security_schemes: Optional[Dict[str, Any]] = None,
+        api_key: Optional[str] = None,
+        bearer_token: Optional[str] = None,
     ) -> None:
         """Initialize executor with safety parameters.
 
@@ -33,6 +37,9 @@ class TestExecutor:
             rate_limit_rps: Maximum requests per second.
             allowed_hosts: List of permitted hostnames.
             base_url: Default base URL for relative paths.
+            security_schemes: Parsed security schemes from OpenAPI spec.
+            api_key: Credential for apiKey schemes.
+            bearer_token: Credential for OAuth2/Bearer schemes.
 
         Raises:
             ValueError: For invalid rate limit values.
@@ -44,6 +51,9 @@ class TestExecutor:
         self.rate_limit_rps = float(rate_limit_rps)
         self.allowed_hosts = [h.lower() for h in (allowed_hosts or ["localhost", "127.0.0.1", "example.com"])]
         self.base_url = base_url or "http://localhost:8000"
+        self.security_schemes = security_schemes or {}
+        self.api_key = api_key
+        self.bearer_token = bearer_token
         self._semaphore = asyncio.Semaphore(5)  # max concurrent requests
         self._lock = asyncio.Lock()
         self._last_request_time: float = 0.0
@@ -61,8 +71,53 @@ class TestExecutor:
         results: List[TestResult] = await asyncio.gather(*tasks, return_exceptions=False)
         return results
 
+    def _apply_auth(self, test: TestCase) -> None:
+        """Inject credentials for OAuth2 and API-key schemes.
+
+        Skips valid credential injection for tests tagged as auth_bypass
+        so that bypass and negative auth tests remain effective.
+        """
+        tags_lower = [t.lower() for t in test.tags]
+        if any(b in tags_lower for b in ("auth_bypass", "bypass", "unauthorized", "invalid_token")):
+            return
+
+        headers = dict(test.headers or {})
+        params = dict(test.query_params or {})
+
+        for scheme_name, scheme in self.security_schemes.items():
+            if not isinstance(scheme, dict):
+                continue
+            scheme_type = scheme.get("type", "").lower()
+            if scheme_type == "apikey" and self.api_key is not None:
+                param_name = scheme.get("name", "X-API-Key")
+                location = scheme.get("in", "header").lower()
+                if location == "header":
+                    headers[param_name] = self.api_key
+                elif location == "query":
+                    params[param_name] = self.api_key
+            elif scheme_type in ("http", "oauth2") and self.bearer_token is not None:
+                if scheme.get("scheme", "").lower() == "bearer" or scheme_type == "oauth2":
+                    headers["Authorization"] = f"Bearer {self.bearer_token}"
+
+        # Fallback common auth headers if no scheme matched but credentials exist
+        if self.bearer_token is not None and not any(
+            k.lower() in ("authorization", "x-auth") for k in headers
+        ):
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+        if self.api_key is not None and not any(
+            any(term in k.lower() for term in ("key", "auth", "api")) for k in headers
+        ):
+            headers["X-API-Key"] = self.api_key
+
+        test.headers = headers
+        test.query_params = params
+
     async def _execute_single(self, test: TestCase) -> TestResult:
         """Execute a single test case, respecting all safety rules."""
+        # Work on a copy so we can safely apply auth without mutating the original
+        test = test.model_copy(deep=True)
+        self._apply_auth(test)
+
         result = TestResult(
             test_case=test,
             repro_curl=test.to_curl(self.base_url),
@@ -116,7 +171,7 @@ class TestExecutor:
                 async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
                     start_time = time.time()
 
-                    # Prepare request args
+                    # Prepare request args (auth already injected by _apply_auth)
                     req_kwargs = {
                         "method": test.method,
                         "url": full_url,

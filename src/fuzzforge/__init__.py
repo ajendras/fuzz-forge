@@ -2,6 +2,7 @@
 
 Intelligently generates context-aware security tests (XSS, SQLi, IDOR,
 auth bypass, business logic flaws) from OpenAPI specifications using Ollama.
+Supports first-class OAuth2 and API-key schemes.
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ def scan(
     mutators: Optional[List[str]] = None,
     dry_run: bool = True,
     output_dir: Optional[str] = "fuzz-reports",
+    api_key: Optional[str] = None,
+    bearer_token: Optional[str] = None,
 ) -> List[TestResult]:
     """High-level convenience function to scan an OpenAPI spec.
 
@@ -35,7 +38,8 @@ def scan(
     safety constraints), and writes reports.
 
     Safe defaults are used: dry_run=True, strict host allow-list, and
-    non-destructive mutations only.
+    non-destructive mutations only. OAuth2/apiKey credentials are injected
+    by the executor unless a test is tagged for auth bypass.
 
     Args:
         spec_path: Path to OpenAPI YAML or JSON file.
@@ -45,6 +49,8 @@ def scan(
         dry_run: If True, generate tests but do not send HTTP requests.
         output_dir: Directory where HTML/JSON reports and curl repro
             files will be written.
+        api_key: API key for schemes of type apiKey.
+        bearer_token: Token for OAuth2 or Bearer schemes.
 
     Returns:
         List of executed TestResult objects with risk scoring and
@@ -65,6 +71,8 @@ def scan(
         mutators=mutators or ["all"],
         dry_run=dry_run,
         output_dir=output_dir,
+        api_key=api_key,
+        bearer_token=bearer_token,
     )
 
     forge.from_spec(spec_path)

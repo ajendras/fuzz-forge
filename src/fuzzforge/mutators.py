@@ -2,6 +2,7 @@
 
 Includes InjectionMutator, AuthBypassMutator, and LogicMutator. Each
 implements the apply() contract to return a mutated TestCase copy.
+AuthBypassMutator enhanced for OAuth2 / API-key schemes.
 """
 
 from __future__ import annotations
@@ -71,7 +72,11 @@ class InjectionMutator(Mutator):
 
 
 class AuthBypassMutator(Mutator):
-    """Attempts common authentication and authorization bypass techniques."""
+    """Attempts common authentication and authorization bypass techniques.
+
+    Enhanced to target OAuth2 and API-key schemes with invalid tokens,
+    missing headers, and privilege escalation.
+    """
 
     name = "auth_bypass"
     description = "Tries to bypass auth using malformed tokens and privilege-escalation headers"
@@ -86,15 +91,24 @@ class AuthBypassMutator(Mutator):
             mutated.description += " (auth bypass variant)"
 
         headers = dict(mutated.headers)
+        # OAuth2 / Bearer bypass techniques
         headers.update(
             {
-                "Authorization": "Bearer null",
+                "Authorization": "Bearer INVALID_TOKEN",
+                "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkJhZCBKYXNvbiJ9.invalid-signature",
                 "X-Forwarded-For": "127.0.0.1",
                 "X-Original-URL": mutated.path,
                 "X-Role": "admin",
+                "X-API-Key": "invalid-or-missing-key",
             }
         )
         mutated.headers = headers
+
+        # Sometimes remove auth headers entirely to test missing auth
+        if mutated.security and len(mutated.security) > 0:
+            mutated.headers.pop("Authorization", None)
+            mutated.headers.pop("X-API-Key", None)
+            mutated.description += " (missing auth headers)"
 
         # Sometimes remove Content-Type to trigger parser quirks
         if "Content-Type" in mutated.headers and mutated.method in ("POST", "PUT"):

@@ -52,6 +52,7 @@ class TestCase(BaseModel):
     description: str = ""
     expected_behavior: str = "Should reject malicious input or reveal logic flaw"
     risk_potential: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
+    security: Dict[str, Any] = Field(default_factory=dict)
 
     def to_curl(self, base_url: str = "http://localhost:8000") -> str:
         """Return a ready-to-run curl command reproducing this test case.
@@ -103,6 +104,7 @@ class FuzzForge:
     """Main entrypoint for loading specs, generating tests, and running them.
 
     Maintains safe defaults (dry-run, host allowlist, rate limiting).
+    Supports first-class OAuth2 and API-key credentials.
     """
 
     def __init__(
@@ -113,6 +115,8 @@ class FuzzForge:
         output_dir: Optional[str] = "fuzz-reports",
         rate_limit_rps: float = 5.0,
         allowed_hosts: Optional[List[str]] = None,
+        api_key: Optional[str] = None,
+        bearer_token: Optional[str] = None,
     ) -> None:
         """Initialize with safe, production-ready defaults.
 
@@ -123,6 +127,8 @@ class FuzzForge:
             output_dir: Directory for reports and repro artifacts.
             rate_limit_rps: Maximum requests per second (enforced by executor).
             allowed_hosts: Hostnames allowed for real HTTP execution.
+            api_key: Credential for apiKey security schemes.
+            bearer_token: Credential for OAuth2 / Bearer schemes.
 
         Raises:
             ValueError: On invalid configuration values.
@@ -138,6 +144,8 @@ class FuzzForge:
         self.output_dir = output_dir or "fuzz-reports"
         self.rate_limit_rps = max(0.5, float(rate_limit_rps))
         self.allowed_hosts = allowed_hosts or ["localhost", "127.0.0.1", "example.com"]
+        self.api_key = api_key
+        self.bearer_token = bearer_token
         self.spec: Optional[APISpec] = None
         self._test_cases: List[TestCase] = []
 
@@ -231,6 +239,7 @@ class FuzzForge:
                     tags=["fallback"],
                     description="Fallback test (LLM unavailable)",
                     risk_potential="medium",
+                    security=ep.get("security", {}),
                 )
             )
         return tests
@@ -255,6 +264,9 @@ class FuzzForge:
             dry_run=self.dry_run,
             rate_limit_rps=self.rate_limit_rps,
             allowed_hosts=self.allowed_hosts,
+            security_schemes=self.spec.security_schemes if self.spec is not None else {},
+            api_key=self.api_key,
+            bearer_token=self.bearer_token,
         )
         results = executor.run_all(tests)
 
