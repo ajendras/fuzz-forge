@@ -198,7 +198,7 @@ def cli_init(
     config_content = f'''# Fuzz Forge Configuration
 # Generated from: {spec.name}
 
-model = "{model}"
+model = "llama3.2"
 limit = 20
 dry_run = true
 rate_limit_rps = 5

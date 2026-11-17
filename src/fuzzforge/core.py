@@ -129,7 +129,7 @@ class FuzzForge:
         """
         if not model or not isinstance(model, str):
             raise ValueError("model must be a non-empty string")
-        if limit := (mutators is not None and not isinstance(mutators, list)):
+        if mutators is not None and not isinstance(mutators, list):
             raise ValueError("mutators must be a list of strings or None")
 
         self.model = model
