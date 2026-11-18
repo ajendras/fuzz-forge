@@ -13,8 +13,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
-from .mutators import Mutator
-
 
 class APISpec(BaseModel):
     """Parsed OpenAPI specification with semantic context for test generation."""
@@ -154,7 +152,7 @@ class FuzzForge:
     def _initialize_components(self) -> None:
         """Lazy import components to avoid circular imports."""
         from .llm import LLMClient
-        from .mutators import get_mutators
+        from .mutators import get_mutators, Mutator
 
         self.llm_client = LLMClient(model=self.model)
         self.mutator_instances: List[Mutator] = get_mutators(self.mutators)
