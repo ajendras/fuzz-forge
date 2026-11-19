@@ -47,7 +47,7 @@ def scan(
         limit: Maximum test cases generated per endpoint.
         mutators: List of mutator names to enable. Pass None for all.
         dry_run: If True, generate tests but do not send HTTP requests.
-        output_dir: Directory where HTML/JSON reports and curl repro
+        output_dir: Directory where HTML/JSON/SARIF reports and curl repro
             files will be written.
         api_key: API key for schemes of type apiKey.
         bearer_token: Token for OAuth2 or Bearer schemes.
@@ -84,6 +84,8 @@ def scan(
 
         reporter = Reporter()
         reporter.generate_html(results, output_dir)
+        reporter.generate_json(results, output_dir)
+        reporter.generate_sarif(results, output_dir)
         reporter.write_repro_files(results, output_dir)
 
     return results

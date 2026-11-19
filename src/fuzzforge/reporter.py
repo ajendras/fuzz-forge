@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List
 
 from jinja2 import Template
 from rich.console import Console
@@ -39,382 +39,260 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         body {
             background: var(--navy);
-            color: #aaffaa;
-            font-family: 'Courier New', monospace;
-            padding: 20px;
-            line-height: 1.4;
-            image-rendering: pixelated;
-        }
-        
-        h1, h2 {
-            font-family: 'Press Start 2P', system-ui;
             color: var(--yellow);
-            text-shadow: 4px 4px 0 var(--pink);
+            font-family: 'Press Start 2P', system-ui;
             image-rendering: pixelated;
-        }
-        
-        .header {
-            border: 8px solid var(--pink);
-            background: #1a1a4e;
             padding: 20px;
-            margin-bottom: 30px;
-            box-shadow: 0 0 0 8px #ffff00;
-            text-align: center;
+            line-height: 1.5;
         }
         
-        .panel {
-            border: 6px solid var(--yellow);
-            background: #111133;
-            padding: 15px;
-            margin-bottom: 25px;
-            box-shadow: 8px 8px 0 #ff0044;
+        .container {
+            max-width: 960px;
+            margin: 0 auto;
+            border: 8px solid var(--pink);
+            background: #111;
+            padding: 20px;
+            box-shadow: 0 0 0 8px #000;
+        }
+        
+        h1 {
+            color: var(--pink);
+            text-align: center;
+            text-shadow: 4px 4px 0 #000;
+            font-size: 18px;
         }
         
         table {
             width: 100%;
             border-collapse: collapse;
-            background: #0a0a2a;
+            margin: 20px 0;
         }
         
         th, td {
-            border: 3px solid var(--pink);
-            padding: 12px 8px;
+            border: 4px solid var(--pink);
+            padding: 12px;
             text-align: left;
-            font-size: 0.85rem;
+            font-size: 12px;
         }
         
         th {
             background: var(--pink);
             color: var(--yellow);
-            font-family: 'Press Start 2P', sans-serif;
-            font-size: 0.7rem;
         }
         
-        tr:nth-child(even) {
-            background: #1c1c4a;
+        .vulnerable {
+            background: #330000;
+            color: #ffaa00;
         }
         
-        .risk-high {
-            color: #ff0044;
-            font-weight: bold;
-        }
-        
-        .risk-med {
-            color: #ffff00;
-        }
-        
-        .tag {
-            display: inline-block;
-            background: #220033;
-            color: var(--yellow);
-            padding: 3px 10px;
-            margin: 2px;
-            font-size: 0.65rem;
-            border: 2px solid var(--yellow);
-            font-family: 'Press Start 2P', sans-serif;
+        .scan-header {
+            border: 6px solid var(--yellow);
+            padding: 15px;
+            text-align: center;
+            margin-bottom: 20px;
+            background: #1a1a1a;
         }
         
         pre {
-            background: #000022;
-            border: 4px solid var(--cyan);
-            padding: 15px;
+            background: #000;
+            padding: 8px;
+            font-size: 10px;
             overflow-x: auto;
-            font-size: 0.75rem;
-            color: #aaffff;
-            white-space: pre-wrap;
-        }
-        
-        .footer {
-            text-align: center;
-            margin-top: 40px;
-            font-size: 0.6rem;
-            color: #666699;
-        }
-        
-        .scanline {
-            position: relative;
-        }
-        
-        .scanline::after {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(
-                to bottom,
-                transparent 50%,
-                rgba(255, 0, 68, 0.07) 50%
-            );
-            background-size: 100% 6px;
-            pointer-events: none;
-            animation: scan 4s linear infinite;
-        }
-        
-        @keyframes scan {
-            0% { background-position: 0 0; }
-            100% { background-position: 0 600px; }
-        }
-        
-        button {
-            font-family: 'Press Start 2P', sans-serif;
-            background: #ffff00;
-            color: #000044;
-            border: 4px solid #ff0044;
-            padding: 10px 20px;
-            cursor: pointer;
-            box-shadow: 4px 4px 0 #ff0044;
-            margin: 10px;
-        }
-        
-        button:active {
-            transform: translate(3px, 3px);
-            box-shadow: 1px 1px 0 #ff0044;
         }
     </style>
 </head>
 <body>
-    <div class="header scanline">
-        <h1 style="font-size: 2.4rem; margin: 10px 0 5px; letter-spacing: 6px;">FUZZ FORGE</h1>
-        <div style="color: #ff0044; font-size: 1.1rem; letter-spacing: 6px;">8-BIT LLM SECURITY SCANNER</div>
-        <div style="color: #00ffcc; margin-top: 18px; font-size: 0.85rem;">
-            REPORT GENERATED {{ generated_at }} • MODEL: {{ model }}
+    <div class="container">
+        <div class="scan-header">
+            <h1>FUZZ FORGE v0.1.0</h1>
+            <p>RETRO SECURITY SCAN REPORT</p>
+            <p>{{ timestamp }}</p>
         </div>
-    </div>
-
-    <div class="panel">
-        <h2 style="font-size: 1.1rem; margin-top:0;">MISSION STATS</h2>
-        <p><strong>TOTAL TESTS:</strong> {{ total }} &nbsp;&nbsp; 
-           <strong>POTENTIAL VULNS:</strong> <span class="risk-high">{{ vulnerable }}</span></p>
-        <p><strong>SAFE DEFAULTS ENFORCED:</strong> Dry-run mode, host allowlist, rate-limited execution.</p>
-    </div>
-
-    <div class="panel">
-        <h2 style="font-size: 1.1rem;">FINDINGS</h2>
+        
+        <h1 style="color:#00ffff">FINDINGS ({{ results|length }})</h1>
+        
         <table>
-            <thead>
-                <tr>
-                    <th>ENDPOINT</th>
-                    <th>RISK</th>
-                    <th>TAGS</th>
-                    <th>STATUS</th>
-                    <th>FINDINGS</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for result in results %}
-                {% set tc = result.test_case %}
-                <tr>
-                    <td style="font-family: 'Press Start 2P', sans-serif; font-size: 0.75rem; max-width: 220px;">{{ tc.endpoint }}</td>
-                    <td>
-                        <span class="{% if result.risk_score > 6 %}risk-high{% else %}risk-med{% endif %}">
-                            {{ result.risk_score }}/10
-                        </span>
-                    </td>
-                    <td>
-                        {% for tag in tc.tags %}
-                        <span class="tag">{{ tag }}</span>
-                        {% endfor %}
-                    </td>
-                    <td>{{ result.status_code or 'DRY' }}</td>
-                    <td style="max-width: 260px;">{{ result.findings | join(', ') or '—' }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
+            <tr>
+                <th>ENDPOINT</th>
+                <th>RISK</th>
+                <th>TAGS</th>
+                <th>REPRO</th>
+            </tr>
+            {% for r in results %}
+            <tr {% if r.is_vulnerable %}class="vulnerable"{% endif %}>
+                <td>{{ r.test_case.endpoint }}</td>
+                <td>{{ r.risk_score }}</td>
+                <td>{{ r.test_case.tags|join(', ') or '—' }}</td>
+                <td><pre>{{ r.repro_curl }}</pre></td>
+            </tr>
+            {% endfor %}
         </table>
-    </div>
-
-    <div class="panel">
-        <h2 style="font-size: 1.1rem;">REPRODUCTION CURLS</h2>
-        {% for result in results %}
-        {% set tc = result.test_case %}
-        <div style="margin-bottom: 40px; border: 4px solid #ffff00; padding: 4px;">
-            <div style="background:#220022; padding:10px 14px; border-bottom:4px solid #ff0044; font-family:'Press Start 2P'; color:#ff0044; font-size:0.8rem;">
-                {{ tc.endpoint }} — {{ tc.description }}
-            </div>
-            <pre>$ {{ result.repro_curl }}</pre>
-            {% if result.response_body %}
-            <details style="margin: 8px 12px;">
-                <summary style="cursor:pointer; color:#ffff00; font-size:0.8rem; font-family:'Press Start 2P';">RESPONSE PREVIEW</summary>
-                <pre style="margin-top:8px; font-size:0.7rem;">{{ result.response_body[:420] }}{% if result.response_body|length > 420 %}...{% endif %}</pre>
-            </details>
-            {% endif %}
+        
+        <div style="margin-top:40px; text-align:center; color:#00ffff; font-size:10px;">
+            MADE WITH ❤️ FOR 8-BIT SECURITY<br>
+            SARIF ALSO GENERATED FOR GITHUB INTEGRATION
         </div>
-        {% endfor %}
     </div>
-
-    <div class="footer">
-        <p>✦ FUZZ FORGE v{{ version }} ✦ PRIVATE • LOCAL LLM • NO DATA LEFT BEHIND ✦</p>
-        <p style="margin-top:15px;">
-            <button onclick="copyAllCurls()">COPY ALL CURLS</button>
-        </p>
-    </div>
-
-    <script>
-        function copyAllCurls() {
-            let curls = '';
-            document.querySelectorAll('pre').forEach(pre => {
-                const text = pre.textContent || '';
-                if (text.includes('curl')) curls += text + '\\n\\n---\\n\\n';
-            });
-            navigator.clipboard.writeText(curls.trim()).then(() => {
-                const btns = document.querySelectorAll('button');
-                for (let b of btns) {
-                    const orig = b.textContent;
-                    b.textContent = 'COPIED!';
-                    setTimeout(() => b.textContent = orig, 1800);
-                }
-            });
-        }
-    </script>
 </body>
 </html>
 """
 
 
-console = Console()
-
-
 class Reporter:
-    """Generates rich reports in HTML, JSON and reproduction scripts."""
+    """Generates multiple report formats including HTML, JSON, SARIF and reproduction scripts."""
 
-    def generate_html(self, results: List[TestResult], out_path: str) -> None:
-        """Generate a retro 8-bit styled HTML report and accompanying JSON.
+    def __init__(self) -> None:
+        self.console = Console(highlight=False)
 
-        Args:
-            results: List of test results to report on.
-            out_path: Directory where report files will be saved.
-        """
-        if not isinstance(out_path, str):
-            raise ValueError("out_path must be a string directory path")
-
-        out_dir = Path(out_path)
+    def generate_html(self, results: List[TestResult], output_dir: str = "fuzz-reports") -> None:
+        """Generate retro-styled HTML report."""
+        out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        # Write JSON report (full fidelity)
-        json_data = [result.model_dump(mode="json") for result in results]
-        (out_dir / "results.json").write_text(
-            json.dumps(json_data, indent=2, default=str), encoding="utf-8"
-        )
-
-        # Render HTML
         template = Template(HTML_TEMPLATE)
         html_content = template.render(
-            results=json_data,
-            total=len(results),
-            vulnerable=sum(1 for r in results if r.risk_score > 5),
-            version="0.1.0",
-            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            model="llama3.2",
+            results=results,
+            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         )
 
         (out_dir / "report.html").write_text(html_content, encoding="utf-8")
+        self.console.print(f"[bold #ffff00]HTML report[/bold #ffff00] → [bold]{out_dir}/report.html[/bold]")
 
-    def print_summary(self, results: List[TestResult]) -> None:
-        """Print a rich terminal summary of the scan results."""
-        if not results:
-            console.print("[yellow]No results to summarize.[/yellow]")
-            return
-
-        vulnerable = sum(1 for r in results if r.is_vulnerable)
-        high_risk = sum(1 for r in results if r.risk_score >= 7)
-
-        console.print(Panel(
-            f"[bold #ffff00]SCAN SUMMARY[/bold #ffff00]\n"
-            f"Tests executed : [bold]{len(results)}[/bold]\n"
-            f"High risk      : [bold #ff0044]{high_risk}[/bold #ff0044]\n"
-            f"Potential bugs : [bold]{vulnerable}[/bold]",
-            title="Fuzz Forge",
-            border_style="#ff0044",
-            padding=(1, 3),
-        ))
-
-        table = Table(
-            title="Top Findings",
-            border_style="#ff0044",
-            title_style="bold #ffff00",
-            show_lines=True,
-        )
-        table.add_column("Endpoint", style="#ffff00", no_wrap=True)
-        table.add_column("Risk", justify="center")
-        table.add_column("Tags", style="bright_blue")
-        table.add_column("Finding", style="#aaffdd")
-
-        displayed = 0
-        for result in results:
-            if displayed >= 7:
-                break
-            tc = result.test_case
-            risk_style = "bold #ff0044" if result.risk_score > 6 else "bold #ffff00"
-            risk_text = f"[{risk_style}]{result.risk_score}[/{risk_style}]"
-            tags = ", ".join(tc.tags[:3]) or "—"
-            finding = (result.findings[0] if result.findings else tc.description)[:38]
-            table.add_row(tc.endpoint, risk_text, tags, finding)
-            displayed += 1
-
-        if displayed == 0:
-            table.add_row("—", "—", "—", "No findings (dry-run mode)")
-
-        console.print(table)
-
-    def write_repro_files(self, results: List[TestResult], out_path: str) -> None:
-        """Write standalone reproduction shell scripts for each test case.
-
-        Args:
-            results: Test results containing the test cases.
-            out_path: Output directory for the .sh files.
-        """
-        if not isinstance(out_path, str):
-            raise ValueError("out_path must be a string directory path")
-
-        out_dir = Path(out_path)
+    def generate_json(self, results: List[TestResult], output_dir: str = "fuzz-reports") -> None:
+        """Write full results as JSON for further processing or replay."""
+        out_dir = Path(output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        data = [result.model_dump(mode="json") for result in results]
+        (out_dir / "results.json").write_text(
+            json.dumps(data, indent=2), encoding="utf-8"
+        )
+        self.console.print(f"[bold #ffff00]JSON results[/bold #ffff00] → [bold]{out_dir}/results.json[/bold]")
+
+    def generate_sarif(self, results: List[TestResult], output_dir: str = "fuzz-reports") -> None:
+        """Generate SARIF 2.1.0 output for direct upload to GitHub Security tab / Code Scanning.
+
+        Only includes findings with risk_score > 5. The file is named results.sarif.json
+        and follows the official schema.
+        """
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        sarif_data = self._build_sarif(results)
+        sarif_path = out_dir / "results.sarif.json"
+        sarif_path.write_text(json.dumps(sarif_data, indent=2), encoding="utf-8")
+
+        self.console.print(f"[bold #ffff00]SARIF report[/bold #ffff00] → [bold]{sarif_path}[/bold]")
+
+    def _build_sarif(self, results: List[TestResult]) -> Dict[str, Any]:
+        """Build a valid SARIF document from test results.
+
+        Only high-signal results (risk_score > 5) are included.
+        """
+        sarif_results: List[Dict[str, Any]] = []
+        rules_seen: Dict[str, Dict[str, Any]] = {}
+
         for result in results:
-            tc = result.test_case
-            repro_path = out_dir / f"repro_{tc.id}.sh"
+            if result.risk_score <= 5:
+                continue
 
-            curl_cmd = result.repro_curl or tc.to_curl()
+            # Determine primary tag for rule ID
+            primary_tag = "generic"
+            for tag in result.test_case.tags:
+                if tag in ("injection", "xss", "sqli", "auth_bypass", "logic", "idor"):
+                    primary_tag = tag
+                    break
 
-            content = f"""#!/usr/bin/env bash
-# Fuzz Forge Reproduction Script
-# Test ID   : {tc.id}
-# Endpoint  : {tc.endpoint}
-# Description: {tc.description}
-# Risk Score: {result.risk_score}
-# Tags      : {', '.join(tc.tags)}
-# Generated : {datetime.now().isoformat()}
+            rule_id = f"fuzzforge/{primary_tag}"
 
-set -euo pipefail
+            if rule_id not in rules_seen:
+                rules_seen[rule_id] = {
+                    "id": rule_id,
+                    "name": f"FuzzForge {primary_tag.title()}",
+                    "shortDescription": {
+                        "text": f"Potential {primary_tag} vulnerability detected by AI fuzzing"
+                    },
+                    "fullDescription": {
+                        "text": "Fuzz Forge uses local LLMs to generate contextual security tests. "
+                        "This finding indicates a test case that may expose a security issue."
+                    },
+                    "help": {
+                        "text": "Review the repro curl command and validate the endpoint behavior. "
+                        "Consider implementing stricter validation or authorization checks."
+                    },
+                    "properties": {
+                        "tags": ["security", "fuzzing", "ai-generated"],
+                        "precision": "medium",
+                        "security-severity": str(result.risk_score * 10),  # 0-100 scale
+                    },
+                }
 
-{curl_cmd}
+            # Map risk to SARIF level
+            if result.risk_score >= 8:
+                level = "error"
+            elif result.risk_score >= 6:
+                level = "warning"
+            else:
+                level = "note"
 
-echo ""
-echo "=== RESPONSE ==="
-echo "Check the output above. Re-run this script to reproduce."
-"""
-            repro_path.write_text(content, encoding="utf-8")
-            repro_path.chmod(0o755)
+            sarif_results.append(
+                {
+                    "ruleId": rule_id,
+                    "level": level,
+                    "message": {
+                        "text": f"{result.test_case.description} (risk={result.risk_score})",
+                        "markdown": f"**{result.test_case.endpoint}**\n\n"
+                        f"{result.test_case.description}\n\n"
+                        f"**Repro:** `{result.repro_curl}`",
+                    },
+                    "locations": [
+                        {
+                            "physicalLocation": {
+                                "uri": result.test_case.path.lstrip("/"),
+                                "uriBaseId": "API",
+                            },
+                            "message": {"text": result.test_case.endpoint},
+                        }
+                    ],
+                    "properties": {
+                        "riskScore": result.risk_score,
+                        "tags": result.test_case.tags,
+                        "reproCurl": result.repro_curl,
+                        "statusCode": result.status_code,
+                    },
+                }
+            )
 
-        # Write a convenience runner
-        runner = out_dir / "run_all_repros.sh"
-        runner.write_text("""#!/usr/bin/env bash
-# Fuzz Forge — Run all reproduction scripts
-echo "========================================"
-echo "   FUZZ FORGE REPRODUCTION SUITE"
-echo "========================================"
-echo ""
+        return {
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "Fuzz Forge",
+                            "version": "0.1.0",
+                            "informationUri": "https://github.com/fuzzforge/fuzz-forge",
+                            "rules": list(rules_seen.values()),
+                        }
+                    },
+                    "results": sarif_results,
+                    "invocations": [
+                        {
+                            "executionSuccessful": True,
+                            "toolExecutionNotifications": [],
+                        }
+                    ],
+                }
+            ],
+        }
 
-for f in repro_*.sh; do
-    if [[ -x "$f" ]]; then
-        echo "▶ Running $f ..."
-        bash "$f"
-        echo "----------------------------------------"
-        echo ""
-    fi
-done
+    def write_repro_files(self, results: List[TestResult], output_dir: str = "fuzz-reports") -> None:
+        """Write executable curl repro scripts for each finding."""
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
 
-echo "All reproductions completed."
-""", encoding="utf-8")
-        runner.chmod(0o755)
+        for result in [r for r in results if r.is_vulnerable]:
+            curl_cmd = result.repro_curl or result.test_case.to_curl()
+            repro_path = out_dir / f"repro_{result.test_case.id}.sh"
+            repro_path.write_text(f"#!/bin/sh\n{curl_cmd}\n", encoding="utf-8")

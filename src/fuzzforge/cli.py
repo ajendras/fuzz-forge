@@ -127,7 +127,7 @@ def cli_scan(
         console.print(Panel.fit(
             f"[bold #ffff00]SCAN COMPLETE[/bold #ffff00]\n"
             f"• Generated [bold]{len(results)}[/bold] intelligent test cases\n"
-            f"• Reports written to [bold]{output_dir}[/bold]",
+            f"• Reports written to [bold]{output_dir}[/bold] (HTML, JSON, SARIF, repros)",
             border_style="#ff0044",
             padding=(1, 4),
         ))
@@ -161,7 +161,7 @@ def cli_scan(
 
         console.print(
             "\n💡 Tip: Run with --execute to send real requests. "
-            "Use --help for more options.",
+            "Use --help for more options. SARIF file is ready for GitHub.",
             style="dim",
         )
 
@@ -212,7 +212,7 @@ enabled_mutators = [
 
 [reporting]
 output_dir = "fuzz-reports"
-formats = ["html", "json"]
+formats = ["html", "json", "sarif"]
 include_curl = true
 '''
 

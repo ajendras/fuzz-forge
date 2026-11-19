@@ -1,96 +1,19 @@
-# ╔══════════════════════════════════════════════════════════════╗
-# ║                    FUZZ FORGE CONFIG                         ║
-# ║          8-BIT LLM POWERED API SECURITY SCANNER             ║
-# ║  Private • Contextual • High-signal fuzzing for real bugs   ║
-# ╚══════════════════════════════════════════════════════════════╝
-#
-# Copy this file to fuzzforge.toml in your project root and edit.
-# Safe defaults are used everywhere: dry-run mode, host allowlists,
-# rate limiting, and non-destructive mutations only.
-#
-# Run with: fuzzforge scan petstore.yaml --dry-run=false
-# Pull model first: ollama pull llama3.2
+# Fuzz Forge Configuration Example
+# Safe defaults for local LLM API fuzzing
 
-# ──────────────────────────────────────────────────────────────
-# CORE SETTINGS
-# ──────────────────────────────────────────────────────────────
-
-# Ollama model (must be available locally)
 model = "llama3.2"
-
-# Maximum test cases generated (LLM base + mutator expansions)
 limit = 20
-
-# When true, only simulate execution (recommended for first runs)
 dry_run = true
-
-# Requests per second when executing against a live target
 rate_limit_rps = 5.0
+allowed_hosts = ["localhost", "127.0.0.1", "example.com"]
 
-# Hosts permitted to receive real HTTP traffic (strict allowlist)
-allowed_hosts = [
-    "localhost",
-    "127.0.0.1",
-    "example.com",
-    "your-api.test",
-    "staging.yourcompany.com",
-]
-
-# Mutators to enable. Use ["all"] or omit to enable every mutator.
-# Available: injection, auth_bypass, logic
 enabled_mutators = [
     "injection",
     "auth_bypass",
     "logic",
 ]
 
-# ──────────────────────────────────────────────────────────────
-# REPORTING
-# ──────────────────────────────────────────────────────────────
 [reporting]
-
-# Directory for HTML report, JSON results, and curl repro files
 output_dir = "fuzz-reports"
-
-# Output formats (html includes retro pixel styling)
-formats = ["html", "json"]
-
-# Include ready-to-run curl commands in reports
+formats = ["html", "json", "sarif"]
 include_curl = true
-
-# Whether to open the HTML report automatically after scan
-auto_open = false
-
-# ──────────────────────────────────────────────────────────────
-# SECURITY & SAFETY
-# ──────────────────────────────────────────────────────────────
-[security]
-
-# Never perform destructive actions (e.g. DELETE with real data)
-non_destructive_only = true
-
-# Maximum risk score that will be auto-executed in non-dry-run mode
-max_auto_risk = 7
-
-# Additional headers that will be stripped before sending
-forbidden_headers = ["X-Internal-Token", "Authorization"]
-
-# ──────────────────────────────────────────────────────────────
-# LLM PROMPT TUNING (advanced)
-# ──────────────────────────────────────────────────────────────
-[llm]
-
-# Temperature for creative but still structured test generation
-temperature = 0.4
-
-# Maximum tokens to request from Ollama
-max_tokens = 2000
-
-# System prompt override (leave empty to use built-in)
-system_prompt = ""
-
-# Example of a custom mutator you could enable after implementing
-# enabled_mutators = ["injection", "auth_bypass", "logic", "custom_domain"]
-
-# Tip: After editing, run `fuzzforge init petstore.yaml` to regenerate
-# a fresh config based on your spec.
