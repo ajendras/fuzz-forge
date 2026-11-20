@@ -221,3 +221,6 @@ class TestExecutor:
             return False
         except Exception:  # noqa: BLE001
             return False
+
+
+    __test__ = False
