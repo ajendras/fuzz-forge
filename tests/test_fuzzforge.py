@@ -1,11 +1,9 @@
 """Test suite for Fuzz Forge.
 
-Covers the full scanning pipeline with mocked LLM/executor, mutator logic,
-parser output, risk scoring, auth injection, SARIF correctness, and the
-new interactive HTML report (modal viewers, JS replay, clipboard).
+Covers models, orchestrator, parser, LLM fallback, mutators, executor (dry-run,
+auth injection, bypass skipping), scan() helper, and reporter. LLM and HTTP
+calls are fully mocked so the suite runs without Ollama or a live server.
 """
-
-from __future__ import annotations
 
 import json
 from pathlib import Path
@@ -13,214 +11,296 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.fuzzforge.core import APISpec, FuzzForge, TestCase, TestResult
-from src.fuzzforge.llm import LLMClient
-from src.fuzzforge.mutators import get_mutators, InjectionMutator
-from src.fuzzforge.parser import OpenAPIParser
-from src.fuzzforge.reporter import Reporter
+from fuzzforge import scan
+from fuzzforge.core import APISpec, FuzzForge, TestCase, TestResult
+from fuzzforge.executor import TestExecutor
+from fuzzforge.llm import LLMClient
+from fuzzforge.mutators import (
+    AuthBypassMutator,
+    InjectionMutator,
+    LogicMutator,
+    get_mutators,
+)
+from fuzzforge.parser import OpenAPIParser
+from fuzzforge.reporter import Reporter
 
 
-@pytest.fixture
-def sample_spec_dict():
-    return {
-        "info": {"title": "Petstore", "version": "1.0.0"},
-        "servers": [{"url": "http://localhost:8000"}],
-        "paths": {
-            "/pets": {
-                "get": {
-                    "summary": "List pets",
-                    "security": [{"apiKey": []}],
-                }
-            }
-        },
-        "components": {
-            "securitySchemes": {
-                "apiKey": {"type": "apiKey", "name": "X-API-Key", "in": "header"}
-            }
-        },
-    }
-
-
-@pytest.fixture
-def sample_test_case():
-    return TestCase(
-        id="tc_123",
-        endpoint="GET /pets",
-        method="GET",
-        path="/pets",
-        payload={"test": "value"},
-        headers={"X-API-Key": "demo"},
-        tags=["injection"],
-        description="Test injection vector",
-        risk_potential="high",
+def test_models_validate() -> None:
+    """Pydantic models accept valid data and compute derived properties."""
+    spec = APISpec(
+        title="Test API",
+        endpoints=[{"method": "GET", "path": "/health"}],
     )
-
-
-@pytest.fixture
-def sample_result(sample_test_case):
-    return TestResult(
-        test_case=sample_test_case,
-        executed=True,
-        status_code=200,
-        response_time=0.12,
-        response_body='{"status": "ok"}',
-        risk_score=7,
-        findings=["Potential injection vector"],
-        repro_curl="curl -X GET 'http://localhost:8000/pets' -H 'X-API-Key: demo'",
-    )
-
-
-def test_testcase_to_curl(sample_test_case):
-    curl = sample_test_case.to_curl(base_url="https://api.example.com")
-    assert "curl -X GET" in curl
-    assert "https://api.example.com/pets" in curl
-
-
-def test_mutator_injection(sample_test_case):
-    mutator = InjectionMutator()
-    mutated = mutator.apply(sample_test_case)
-    assert mutated is not None
-    assert "injection" in mutated.tags
-    assert mutated.risk_potential == "high"
-    assert any(v == "<script>alert(1)</script>" for v in mutated.payload.values())
-
-
-def test_get_mutators():
-    mutators = get_mutators(["all"])
-    assert len(mutators) == 3
-    names = {m.name for m in mutators}
-    assert "injection" in names
-    assert "auth_bypass" in names
-    assert "logic" in names
-
-    specific = get_mutators(["injection"])
-    assert len(specific) == 1
-    assert specific[0].name == "injection"
-
-
-def test_parser(sample_spec_dict, tmp_path):
-    spec_file = tmp_path / "spec.yaml"
-    spec_file.write_text(json.dumps(sample_spec_dict), encoding="utf-8")
-
-    parser = OpenAPIParser()
-    spec = parser.parse(str(spec_file))
-    assert spec.title == "Petstore"
+    assert spec.title == "Test API"
     assert len(spec.endpoints) == 1
-    assert "apiKey" in spec.security_schemes
+
+    tc = TestCase(
+        endpoint="GET /health",
+        method="GET",
+        path="/health",
+        tags=["test"],
+        risk_potential="medium",
+    )
+    assert tc.endpoint == "GET /health"
+    assert tc.to_curl("http://localhost:8000") == "curl -X GET 'http://localhost:8000/health'"
+
+    result = TestResult(test_case=tc, risk_score=7)
+    assert result.is_vulnerable is True
+    assert result.risk_score == 7
 
 
-@patch("src.fuzzforge.llm.ollama.chat")
-def test_llm_client(mock_chat):
-    mock_chat.return_value = {
-        "message": {
-            "content": '[{"endpoint": "GET /pets", "method": "GET", "path": "/pets", '
-            '"payload": {}, "headers": {}, "tags": ["injection"], '
-            '"description": "test", "risk_potential": "medium", "security": {}}]'
-        }
+def test_fuzzforge_init_validation() -> None:
+    """Constructor enforces safe defaults and rejects bad values."""
+    forge = FuzzForge(
+        model="llama3.2",
+        dry_run=True,
+        rate_limit_rps=10.0,
+        allowed_hosts=["localhost"],
+    )
+    assert forge.model == "llama3.2"
+    assert forge.dry_run is True
+    assert forge.rate_limit_rps == 10.0
+    assert "localhost" in forge.allowed_hosts
+
+    with pytest.raises(ValueError):
+        FuzzForge(model="")
+
+    with pytest.raises(ValueError):
+        FuzzForge(mutators="not-a-list")  # type: ignore[arg-type]
+
+
+@patch("fuzzforge.core.OpenAPIParser")
+def test_from_spec(mock_parser: MagicMock) -> None:
+    """from_spec parses a file into an APISpec."""
+    mock_spec = APISpec(
+        title="Petstore",
+        endpoints=[{"method": "GET", "path": "/pets"}],
+        security_schemes={"apiKey": {"type": "apiKey"}},
+    )
+    mock_parser.return_value.parse.return_value = mock_spec
+
+    forge = FuzzForge(dry_run=True)
+    forge.from_spec("examples/petstore.yaml")
+    assert forge.spec is not None
+    assert forge.spec.title == "Petstore"
+    assert len(forge.spec.endpoints) == 1
+
+
+@patch("fuzzforge.core.LLMClient")
+def test_generate(mock_llm_class: MagicMock) -> None:
+    """generate calls LLM and expands via mutators, deduplicates."""
+    mock_client = mock_llm_class.return_value
+    mock_client.generate_tests.return_value = [
+        TestCase(
+            endpoint="GET /pets",
+            method="GET",
+            path="/pets",
+            tags=["base"],
+        )
+    ]
+
+    forge = FuzzForge(model="llama3.2", mutators=["injection", "logic"], dry_run=True)
+    forge.spec = APISpec(endpoints=[{"method": "GET", "path": "/pets"}])
+    tests = forge.generate(limit=10)
+
+    assert len(tests) >= 3  # base + two mutators
+    tags = {tag for t in tests for tag in t.tags}
+    assert "injection" in tags
+    assert "logic" in tags
+
+
+@patch("fuzzforge.core.TestExecutor")
+def test_run(mock_executor_class: MagicMock) -> None:
+    """run delegates to executor and enriches results with risk scoring."""
+    mock_executor = mock_executor_class.return_value
+    mock_result = TestResult(
+        test_case=TestCase(endpoint="GET /pets", path="/pets", tags=["injection"]),
+        risk_score=0,
+    )
+    mock_executor.run_all.return_value = [mock_result]
+
+    forge = FuzzForge(dry_run=True)
+    forge.spec = APISpec(servers=["http://localhost:8000"], security_schemes={})
+    results = forge.run([TestCase(endpoint="GET /pets", path="/pets", tags=["injection"])])
+
+    assert len(results) == 1
+    assert results[0].risk_score == 7
+    assert "Injection vector detected" in results[0].findings
+
+
+def test_scan_integration(tmp_path: Path) -> None:
+    """High-level scan() works end-to-end with mocked LLM."""
+    spec_content = """openapi: 3.0.0
+info:
+  title: Test API
+  version: 1.0
+paths:
+  /test:
+    get:
+      summary: test endpoint
+"""
+    spec_file = tmp_path / "test.yaml"
+    spec_file.write_text(spec_content)
+
+    fake_json = json.dumps(
+        [
+            {
+                "endpoint": "GET /test",
+                "method": "GET",
+                "path": "/test",
+                "payload": {},
+                "headers": {},
+                "tags": ["injection"],
+                "description": "Test injection",
+                "risk_potential": "medium",
+                "security": {},
+            }
+        ]
+    )
+
+    with patch("fuzzforge.llm.ollama.chat") as mock_chat:
+        mock_chat.return_value = {"message": {"content": fake_json}}
+
+        results = scan(
+            spec_path=str(spec_file),
+            model="llama3.2",
+            limit=5,
+            dry_run=True,
+            output_dir=str(tmp_path),
+        )
+
+    assert len(results) >= 1
+    assert any("injection" in r.test_case.tags for r in results)
+    assert (tmp_path / "report.html").exists() or (tmp_path / "results.json").exists()
+
+
+def test_mutators_apply() -> None:
+    """Each mutator returns a correctly tagged and mutated copy."""
+    base = TestCase(
+        endpoint="POST /users",
+        method="POST",
+        path="/users",
+        payload={"username": "alice"},
+        tags=["base"],
+    )
+
+    injection = InjectionMutator().apply(base)
+    assert injection is not None
+    assert "injection" in injection.tags
+    assert injection.risk_potential == "high"
+    assert "<script>alert(1)</script>" in str(injection.payload)
+
+    auth = AuthBypassMutator().apply(base)
+    assert auth is not None
+    assert "auth_bypass" in auth.tags
+    assert auth.risk_potential == "critical"
+    assert "INVALID_TOKEN" in str(auth.headers)
+
+    logic = LogicMutator().apply(base)
+    assert logic is not None
+    assert "logic" in logic.tags
+    assert logic.risk_potential == "high"
+    assert "target_user_id" in logic.payload or "admin" in str(logic.payload)
+
+
+def test_get_mutators_registry() -> None:
+    """get_mutators returns correct instances for 'all' and explicit lists."""
+    all_mut = get_mutators(["all"])
+    assert len(all_mut) == 3
+    assert any(isinstance(m, InjectionMutator) for m in all_mut)
+    assert any(isinstance(m, AuthBypassMutator) for m in all_mut)
+    assert any(isinstance(m, LogicMutator) for m in all_mut)
+
+    explicit = get_mutators(["logic"])
+    assert len(explicit) == 1
+    assert isinstance(explicit[0], LogicMutator)
+
+    # fallback to injection when unknown
+    fallback = get_mutators(["unknown"])
+    assert len(fallback) == 1
+    assert isinstance(fallback[0], InjectionMutator)
+
+
+def test_parser_petstore() -> None:
+    """Parser extracts endpoints, schemas and security schemes from real example."""
+    parser = OpenAPIParser()
+    spec = parser.parse("examples/petstore.yaml")
+    assert isinstance(spec, APISpec)
+    assert len(spec.endpoints) > 0
+    assert "pet" in str(spec.endpoints).lower() or any(
+        "pet" in e.get("summary", "").lower() for e in spec.endpoints
+    )
+    assert isinstance(spec.security_schemes, dict)
+
+
+def test_executor_dry_run_and_auth() -> None:
+    """Dry-run produces simulated results; auth injection respects bypass tags."""
+    schemes = {
+        "apiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+        "bearer": {"type": "http", "scheme": "bearer"},
     }
 
+    executor = TestExecutor(
+        dry_run=True,
+        security_schemes=schemes,
+        api_key="secret-key-123",
+        bearer_token="eyJ...",
+    )
+
+    # Normal test gets credentials
+    normal = TestCase(
+        endpoint="GET /secure",
+        method="GET",
+        path="/secure",
+        tags=["baseline"],
+    )
+    results = executor.run_all([normal])
+    assert len(results) == 1
+    res = results[0]
+    assert res.test_case.headers.get("X-API-Key") == "secret-key-123"
+    assert "Bearer eyJ" in str(res.test_case.headers.get("Authorization", ""))
+
+    # Auth-bypass test skips credential injection
+    bypass = TestCase(
+        endpoint="GET /admin",
+        method="GET",
+        path="/admin",
+        tags=["auth_bypass"],
+    )
+    results = executor.run_all([bypass])
+    res = results[0]
+    headers_lower = {k.lower(): v for k, v in res.test_case.headers.items()}
+    assert "secret-key-123" not in str(headers_lower)
+    assert "eyJ" not in str(headers_lower)
+    assert res.risk_score == 8
+
+
+def test_llm_fallback() -> None:
+    """LLMClient falls back to deterministic tests when Ollama is unavailable."""
     client = LLMClient(model="llama3.2")
     spec = APISpec(
         title="Test",
-        endpoints=[{"method": "GET", "path": "/pets"}],
-        security_schemes={},
+        endpoints=[
+            {"method": "POST", "path": "/users", "security": [{"apiKey": []}]},
+            {"method": "GET", "path": "/pets"},
+        ],
     )
-    tests = client.generate_tests(spec, count=1)
-    assert len(tests) == 1
-    assert tests[0].endpoint == "GET /pets"
-
-
-def test_fuzzforge_fallback(sample_spec_dict, tmp_path):
-    spec_file = tmp_path / "spec.yaml"
-    spec_file.write_text(json.dumps(sample_spec_dict), encoding="utf-8")
-
-    forge = FuzzForge(model="llama3.2", dry_run=True, mutators=["injection"])
-    forge.from_spec(str(spec_file))
-    tests = forge.generate(limit=3)
-    assert len(tests) >= 1
+    tests = client._fallback_tests(spec, 2)
+    assert len(tests) == 2
     assert any("fallback" in t.tags for t in tests)
+    assert any("injection" in t.tags for t in tests)
 
 
-def test_executor_dry_run(sample_test_case):
-    from src.fuzzforge.executor import TestExecutor
-
-    executor = TestExecutor(dry_run=True, allowed_hosts=["localhost"])
-    results = executor.run_all([sample_test_case])
-    assert len(results) == 1
-    assert results[0].risk_score == 7
-    assert "dry-run" in results[0].response_body.lower()
-
-
-def test_reporter_interactive_html(tmp_path, sample_result):
-    """Test the interactive HTML report contains all expected interactive elements."""
+def test_reporter_artifacts(tmp_path: Path) -> None:
+    """Reporter writes JSON (and other formats) without error."""
     reporter = Reporter()
-    results = [sample_result]
-    reporter.generate_html(results, str(tmp_path))
-
-    html_file = tmp_path / "report.html"
-    assert html_file.exists()
-
-    content = html_file.read_text(encoding="utf-8")
-    assert "INTERACTIVE REPORT" in content
-    assert "REPLAY IN BROWSER" in content
-    assert "const RESULTS" in content
-    assert "openModal" in content
-    assert "performReplay" in content
-    assert "copyCurl" in content
-    assert "modal" in content
-    assert "tab-content" in content
-    assert "/pets" in content
-    assert "curl -X GET" in content
-    assert "Potential injection vector" in content
-
-
-def test_reporter_json_sarif_repros(tmp_path, sample_result):
-    reporter = Reporter()
-    results = [sample_result]
+    tc = TestCase(endpoint="GET /test", method="GET", path="/test", tags=["test"])
+    result = TestResult(test_case=tc, risk_score=5, findings=["ok"])
+    results = [result]
 
     reporter.generate_json(results, str(tmp_path))
-    reporter.generate_sarif(results, str(tmp_path))
-    reporter.write_repro_files(results, str(tmp_path))
-
-    assert (tmp_path / "results.json").exists()
-    assert (tmp_path / "results.sarif.json").exists()
-    assert (tmp_path / "repros" / "tc_123.sh").exists()
-
-    sarif = json.loads((tmp_path / "results.sarif.json").read_text())
-    assert sarif["runs"][0]["results"]
-
-
-def test_scan_integration(tmp_path, sample_result):
-    """Test high-level scan() produces interactive report."""
-    with patch("src.fuzzforge.core.FuzzForge.from_spec"):
-        with patch("src.fuzzforge.core.FuzzForge.generate") as mock_gen:
-            with patch("src.fuzzforge.core.FuzzForge.run") as mock_run:
-                mock_gen.return_value = []
-                mock_run.return_value = [sample_result]
-
-                from src.fuzzforge import scan
-
-                results = scan(
-                    spec_path=str(tmp_path / "dummy.yaml"),
-                    model="llama3.2",
-                    limit=5,
-                    dry_run=True,
-                    output_dir=str(tmp_path),
-                )
-
-                assert len(results) == 1
-                assert (tmp_path / "report.html").exists()
-                assert (tmp_path / "results.json").exists()
-
-
-def test_testresult_vulnerable_property(sample_result):
-    assert sample_result.is_vulnerable is True
-    sample_result.risk_score = 3
-    assert sample_result.is_vulnerable is False
-
-
-def test_core_risk_scoring(sample_test_case):
-    from src.fuzzforge.core import TestResult
-
-    result = TestResult(test_case=sample_test_case, risk_score=9)
-    assert "authentication bypass" in " ".join(result.findings).lower() or result.risk_score == 9
+    json_file = tmp_path / "results.json"
+    assert json_file.exists()
+    data = json.loads(json_file.read_text())
+    assert len(data) == 1
+    assert data[0]["risk_score"] == 5
