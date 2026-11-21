@@ -41,6 +41,10 @@ def scan(
     non-destructive mutations only. OAuth2/apiKey credentials are injected
     by the executor unless a test is tagged for auth bypass.
 
+    The generated report.html is fully interactive with request/response
+    viewers (formatted JSON/headers) and one-click replay (copy cURL or
+    live browser fetch with safety warning).
+
     Args:
         spec_path: Path to OpenAPI YAML or JSON file.
         model: Ollama model identifier (must be available locally).
