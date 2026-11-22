@@ -8,6 +8,7 @@ and API-key support.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,8 +40,18 @@ class OpenAPIParser:
             raise FileNotFoundError(f"OpenAPI spec not found: {path}")
 
         try:
+            # Fix common YAML parsing issue where version: 1.0 becomes float 1.0
+            # but OpenAPI validators require a string. We quote it via regex so
+            # the downstream validator succeeds.
+            spec_text = spec_path.read_text(encoding="utf-8")
+            spec_text = re.sub(
+                r"(?m)^(\s*version\s*:\s*)([0-9][0-9.]*)(\s*(?:#.*)?$)",
+                r'\1"\2"\3',
+                spec_text,
+            )
+
             parser = prance.ResolvingParser(
-                str(spec_path),
+                spec_string=spec_text,
                 backend="openapi-spec-validator",
                 strict=False,
             )

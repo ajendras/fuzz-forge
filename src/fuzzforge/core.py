@@ -241,7 +241,7 @@ class FuzzForge:
                     tags=["fallback"],
                     description="Fallback test (LLM unavailable)",
                     risk_potential="medium",
-                    security=ep.get("security", {}),
+                    security={},  # ensure dict (OpenAPI security can be a list)
                 )
             )
         return tests
@@ -293,3 +293,12 @@ class FuzzForge:
                 result.findings.append("Potential business-logic flaw")
 
         return results
+
+
+# Re-export for tests and backward compatibility (avoids circular imports
+# by placing after all definitions)
+from .parser import OpenAPIParser  # noqa: F401
+from .llm import LLMClient  # noqa: F401
+from .executor import TestExecutor  # noqa: F401
+
+__test__ = False

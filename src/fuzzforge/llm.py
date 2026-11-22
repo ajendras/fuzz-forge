@@ -198,7 +198,7 @@ Output ONLY the JSON array. No markdown, no extra text.
                     tags=["injection", "xss", "fallback"],
                     description="Fallback test case (LLM unavailable)",
                     risk_potential="medium",
-                    security=ep.get("security", {}),
+                    security={},  # ensure dict (OpenAPI security can be a list)
                 )
             )
         return tests

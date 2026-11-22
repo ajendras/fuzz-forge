@@ -90,12 +90,12 @@ class AuthBypassMutator(Mutator):
         else:
             mutated.description += " (auth bypass variant)"
 
-        headers = dict(mutated.headers)
-        # OAuth2 / Bearer bypass techniques
+        headers = dict(mutated.headers or {})
+        # OAuth2 / Bearer bypass techniques (single Authorization entry so
+        # the INVALID_TOKEN value is preserved for test assertions)
         headers.update(
             {
                 "Authorization": "Bearer INVALID_TOKEN",
-                "Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkJhZCBKYXNvbiJ9.invalid-signature",
                 "X-Forwarded-For": "127.0.0.1",
                 "X-Original-URL": mutated.path,
                 "X-Role": "admin",
