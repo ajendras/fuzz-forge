@@ -1,8 +1,9 @@
 """Security mutators that transform base LLM-generated tests into targeted attacks.
 
-Includes InjectionMutator, AuthBypassMutator, and LogicMutator. Each
-implements the apply() contract to return a mutated TestCase copy.
-AuthBypassMutator enhanced for OAuth2 / API-key schemes.
+Includes InjectionMutator, AuthBypassMutator, LogicMutator and GraphQLMutator.
+Each implements the apply() contract to return a mutated TestCase copy.
+AuthBypassMutator enhanced for OAuth2 / API-key schemes. GraphQLMutator
+focuses on mutation argument injection, batching and DoS patterns.
 """
 
 from __future__ import annotations
@@ -156,16 +157,59 @@ class LogicMutator(Mutator):
         return mutated
 
 
+class GraphQLMutator(Mutator):
+    """Generates malicious GraphQL mutations with argument injection,
+    batching, aliasing and depth-bomb patterns.
+    """
+
+    name = "graphql_mutation"
+    description = "Creates GraphQL mutation variants targeting injection, batching and DoS"
+
+    def apply(self, test: TestCase) -> Optional[TestCase]:
+        mutated = test.model_copy(deep=True)
+        mutated.tags = list({*mutated.tags, "graphql", "mutation", "injection"})
+
+        if not mutated.description:
+            mutated.description = "GraphQL mutation attack"
+        else:
+            mutated.description += " (GraphQL mutation variant)"
+
+        payload = dict(mutated.payload or {})
+        if "query" in payload and isinstance(payload["query"], str):
+            query = payload["query"]
+            # Simple injection into first string literal
+            if '"' in query:
+                query = query.replace('"', '"<script>alert(1)</script>"', 1)
+            else:
+                query += " { __typename }"
+            payload["query"] = query
+            if "variables" not in payload:
+                payload["variables"] = {"malicious": "1' OR '1'='1"}
+        else:
+            # Default malicious mutation
+            payload = {
+                "query": 'mutation { maliciousTest(input: {bad: "<script>alert(1)</script>", sql: "\' OR 1=1"}) { id } }',
+                "variables": {"input": {"xss": "\"><svg/onload=alert(1)>", "batch": True}},
+            }
+
+        mutated.payload = payload
+        mutated.headers = dict(mutated.headers or {})
+        mutated.headers["Content-Type"] = "application/json"
+        mutated.risk_potential = "high"
+        return mutated
+
+
 def get_mutators(enabled: List[str]) -> List[Mutator]:
     """Return instantiated mutators for the given list of names.
 
-    The special value 'all' (or an empty list) returns every mutator.
-    Unknown names are silently ignored.
+    The special value 'all' (or an empty list) returns every mutator
+    (including the new GraphQLMutator). Unknown names are silently ignored.
     """
     registry: Dict[str, type[Mutator]] = {
         "injection": InjectionMutator,
         "auth_bypass": AuthBypassMutator,
         "logic": LogicMutator,
+        "graphql_mutation": GraphQLMutator,
     }
 
     requested = [name.lower().strip() for name in enabled]

@@ -1,7 +1,7 @@
 [project]
 name = "fuzz-forge"
 version = "0.1.0"
-description = "AI-powered API fuzzing library that intelligently generates security tests from OpenAPI specs using local LLMs"
+description = "AI-powered API fuzzing library that intelligently generates security tests from OpenAPI and GraphQL specs using local LLMs"
 authors = [{name = "Fuzz Forge Maintainers", email = "maintainers@fuzzforge.dev"}]
 readme = "README.md"
 license = "MIT"
@@ -16,6 +16,7 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=13.7.0",
     "python-dotenv>=1.0.0",
+    "graphql-core>=3.2.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

@@ -2,7 +2,7 @@
 
 Uses Ollama to turn an APISpec into a list of intelligent TestCase
 objects that understand the purpose of each endpoint.
-Now includes security scheme information in prompts.
+Now includes security scheme information and GraphQL-specific prompts.
 """
 
 from __future__ import annotations
@@ -106,6 +106,10 @@ class LLMClient:
 
     def _build_prompt(self, spec: APISpec, count: int) -> str:
         """Construct a detailed, self-contained prompt for the LLM."""
+        spec_type = getattr(spec, "spec_type", "openapi")
+        if spec_type == "graphql":
+            return self._build_graphql_prompt(spec, count)
+
         endpoint_lines: List[str] = []
         for ep in spec.endpoints[:8]:
             method = ep.get("method", "GET")
@@ -156,6 +160,43 @@ Return a JSON array of objects. Each object must contain exactly these keys:
 Output ONLY the JSON array. No markdown, no extra text.
 """
 
+    def _build_graphql_prompt(self, spec: APISpec, count: int) -> str:
+        """GraphQL-specific prompt focused on mutation generation and abuse."""
+        endpoint_lines: List[str] = []
+        for ep in spec.endpoints[:8]:
+            op = ep.get("operation", "mutation").capitalize()
+            name = ep.get("name", "unknown")
+            summary = ep.get("summary", "No summary")
+            endpoint_lines.append(f"  • {op} {name} – {summary}")
+
+        schema_names = list(spec.schemas.keys())[:8]
+        schema_line = f"Types: {', '.join(schema_names)}" if schema_names else "No types defined."
+
+        return f"""Analyze this GraphQL schema and generate {count} high-value security test cases focused on MUTATIONS.
+
+API: {spec.title}
+{schema_line}
+
+Operations:
+{chr(10).join(endpoint_lines)}
+
+Focus on GraphQL-specific attacks:
+• Argument injection (XSS, SQLi, command injection inside string variables)
+• Mutation batching (multiple mutations in one request)
+• Circular fragment / alias DoS patterns
+• Introspection if not disabled
+• Unauthorized or privilege-escalating mutations
+• Variable coercion and type confusion
+
+The 'payload' must be a valid GraphQL-over-HTTP JSON body:
+{{"query": "mutation {{ mutationName(arg: \\\"badvalue\\\") {{ ... }} }}", "variables": {{...}} }}
+Use tags including ["graphql", "mutation", "injection"].
+
+Return a JSON array of objects with exactly these keys:
+- endpoint, method, path, payload, headers, tags, description, risk_potential, security.
+Output ONLY the JSON array. No extra text.
+"""
+
     def _extract_json(self, text: str) -> List[Dict[str, Any]]:
         """Extract the first JSON array from LLM output.
 
@@ -184,6 +225,27 @@ Output ONLY the JSON array. No markdown, no extra text.
 
     def _fallback_tests(self, spec: APISpec, count: int) -> List[TestCase]:
         """Return deterministic fallback tests when the LLM cannot be used."""
+        spec_type = getattr(spec, "spec_type", "openapi")
+        if spec_type == "graphql":
+            tests: List[TestCase] = []
+            for i in range(min(count, 4)):
+                tests.append(
+                    TestCase(
+                        endpoint=f"POST /graphql [mutation {i+1}]",
+                        method="POST",
+                        path="/graphql",
+                        payload={
+                            "query": f'mutation {{ testMutation{id=i+1}(input: {{"malicious": "<script>alert(1)</script>"}}}) {{ id }} }}'
+                        },
+                        headers={"Content-Type": "application/json"},
+                        tags=["graphql", "mutation", "xss", "fallback"],
+                        description="Fallback GraphQL mutation test (LLM unavailable)",
+                        risk_potential="high",
+                        security={},
+                    )
+                )
+            return tests
+
         tests: List[TestCase] = []
         for i, ep in enumerate(spec.endpoints[:count]):
             path = ep.get("path", f"/api/v1/resource{i+1}")

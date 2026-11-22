@@ -2,7 +2,7 @@
 
 Defines the data models (APISpec, TestCase, TestResult) and the main
 FuzzForge class that coordinates parsing, LLM generation, mutation,
-and execution of security tests.
+and execution of security tests. Now supports GraphQL schemas.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class APISpec(BaseModel):
-    """Parsed OpenAPI specification with semantic context for test generation."""
+    """Parsed API specification (OpenAPI or GraphQL) with semantic context for test generation."""
 
     title: str = "Untitled API"
     version: str = "1.0.0"
@@ -24,6 +24,7 @@ class APISpec(BaseModel):
     security_schemes: Dict[str, Any] = Field(default_factory=dict)
     servers: List[str] = Field(default_factory=lambda: ["http://localhost:8000"])
     raw_spec: Dict[str, Any] = Field(default_factory=dict)
+    spec_type: str = Field(default="openapi", pattern="^(openapi|graphql)$")
 
     @model_validator(mode="after")
     def validate_endpoints(self) -> APISpec:
@@ -106,7 +107,7 @@ class FuzzForge:
     """Main entrypoint for loading specs, generating tests, and running them.
 
     Maintains safe defaults (dry-run, host allowlist, rate limiting).
-    Supports first-class OAuth2 and API-key credentials.
+    Supports first-class OAuth2, API-key, and GraphQL schemas with mutation generation.
     """
 
     def __init__(
@@ -162,10 +163,10 @@ class FuzzForge:
         self.mutator_instances: List[Mutator] = get_mutators(self.mutators)
 
     def from_spec(self, spec_path: str) -> None:
-        """Parse an OpenAPI file into an APISpec.
+        """Parse an OpenAPI or GraphQL file into an APISpec.
 
         Args:
-            spec_path: Filesystem path to OpenAPI YAML/JSON.
+            spec_path: Filesystem path to OpenAPI YAML/JSON or GraphQL SDL.
 
         Raises:
             FileNotFoundError: If the file does not exist.
@@ -173,7 +174,7 @@ class FuzzForge:
         """
         path = Path(spec_path)
         if not path.is_file():
-            raise FileNotFoundError(f"OpenAPI spec not found: {spec_path}")
+            raise FileNotFoundError(f"OpenAPI/GraphQL spec not found: {spec_path}")
 
         from .parser import OpenAPIParser
 
@@ -228,7 +229,28 @@ class FuzzForge:
         if not self.spec or not self.spec.endpoints:
             return []
 
+        spec_type = getattr(self.spec, "spec_type", "openapi")
         tests: List[TestCase] = []
+
+        if spec_type == "graphql":
+            for _ in range(min(limit, 4)):
+                tests.append(
+                    TestCase(
+                        endpoint="POST /graphql [mutation]",
+                        method="POST",
+                        path="/graphql",
+                        payload={
+                            "query": 'mutation { test(input: {malicious: "<script>alert(1)</script>"}) { id } }'
+                        },
+                        headers={"Content-Type": "application/json"},
+                        tags=["graphql", "mutation", "injection", "fallback"],
+                        description="Fallback GraphQL mutation test (LLM unavailable)",
+                        risk_potential="high",
+                        security={},
+                    )
+                )
+            return tests
+
         for ep in self.spec.endpoints[:limit]:
             method = ep.get("method", "GET")
             path = ep.get("path", "/")
@@ -291,6 +313,9 @@ class FuzzForge:
             elif "logic" in tags:
                 result.risk_score = 6
                 result.findings.append("Potential business-logic flaw")
+            elif "graphql" in tags and "mutation" in tags:
+                result.risk_score = 8
+                result.findings.append("GraphQL mutation attack vector")
 
         return results
 

@@ -1,8 +1,9 @@
 """Fuzz Forge — AI-powered API fuzzing with local LLMs.
 
 Intelligently generates context-aware security tests (XSS, SQLi, IDOR,
-auth bypass, business logic flaws) from OpenAPI specifications using Ollama.
-Supports first-class OAuth2 and API-key schemes.
+auth bypass, business logic flaws, GraphQL mutation abuse) from OpenAPI
+and GraphQL schemas using Ollama. Supports first-class OAuth2, API-key,
+and GraphQL SDL parsing with dedicated mutation generation.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def scan(
     api_key: Optional[str] = None,
     bearer_token: Optional[str] = None,
 ) -> List[TestResult]:
-    """High-level convenience function to scan an OpenAPI spec.
+    """High-level convenience function to scan an OpenAPI or GraphQL spec.
 
     Creates a FuzzForge instance, loads the spec, generates intelligent
     test cases via the local LLM, executes them (subject to dry_run and
@@ -39,14 +40,15 @@ def scan(
 
     Safe defaults are used: dry_run=True, strict host allow-list, and
     non-destructive mutations only. OAuth2/apiKey credentials are injected
-    by the executor unless a test is tagged for auth bypass.
+    by the executor unless a test is tagged for auth bypass. GraphQL files
+    (.graphql/.gql) are auto-detected and receive mutation-focused tests.
 
     The generated report.html is fully interactive with request/response
     viewers (formatted JSON/headers) and one-click replay (copy cURL or
     live browser fetch with safety warning).
 
     Args:
-        spec_path: Path to OpenAPI YAML or JSON file.
+        spec_path: Path to OpenAPI YAML/JSON or GraphQL SDL file.
         model: Ollama model identifier (must be available locally).
         limit: Maximum test cases generated per endpoint.
         mutators: List of mutator names to enable. Pass None for all.
