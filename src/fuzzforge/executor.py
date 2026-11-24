@@ -2,7 +2,8 @@
 
 Handles dry-run simulation, async HTTP requests via httpx, rate limiting,
 host allowlisting, and produces TestResult objects with risk heuristics.
-Now includes first-class support for OAuth2 and API-key schemes.
+Now includes first-class support for OAuth2 and API-key schemes plus
+auto-detection of rate-limit headers with dynamic backoff.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import time
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import httpx
 
@@ -29,6 +29,7 @@ class TestExecutor:
         security_schemes: Optional[Dict[str, Any]] = None,
         api_key: Optional[str] = None,
         bearer_token: Optional[str] = None,
+        auto_detect_rate_limits: bool = True,
     ) -> None:
         """Initialize executor with safety parameters.
 
@@ -40,6 +41,8 @@ class TestExecutor:
             security_schemes: Parsed security schemes from OpenAPI spec.
             api_key: Credential for apiKey schemes.
             bearer_token: Credential for OAuth2/Bearer schemes.
+            auto_detect_rate_limits: Whether to parse rate-limit headers and
+                dynamically back off.
 
         Raises:
             ValueError: For invalid rate limit values.
@@ -54,9 +57,13 @@ class TestExecutor:
         self.security_schemes = security_schemes or {}
         self.api_key = api_key
         self.bearer_token = bearer_token
+        self.auto_detect_rate_limits = auto_detect_rate_limits
         self._semaphore = asyncio.Semaphore(5)  # max concurrent requests
         self._lock = asyncio.Lock()
         self._last_request_time: float = 0.0
+        self._rate_limit_remaining: Optional[int] = None
+        self._rate_limit_reset: Optional[float] = None
+        self._retry_after: float = 0.0
 
     def run_all(self, tests: List[TestCase]) -> List[TestResult]:
         """Synchronous entrypoint that runs all tests (uses asyncio under the hood)."""
@@ -112,6 +119,43 @@ class TestExecutor:
         test.headers = headers
         test.query_params = params
 
+    def _update_rate_limits_from_headers(self, headers: httpx.Headers) -> None:
+        """Parse common rate-limit headers and update internal state for dynamic backoff.
+
+        Supports Retry-After, RateLimit-Remaining, X-RateLimit-Remaining,
+        RateLimit-Reset, X-RateLimit-Reset (and case variants).
+        """
+        # Retry-After (seconds)
+        retry_after = headers.get("Retry-After")
+        if retry_after:
+            try:
+                self._retry_after = float(retry_after)
+            except (ValueError, TypeError):
+                pass
+
+        # Remaining count
+        for name in ("RateLimit-Remaining", "X-RateLimit-Remaining", "X-Rate-Limit-Remaining"):
+            rem = headers.get(name)
+            if rem is not None:
+                try:
+                    self._rate_limit_remaining = int(rem)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Reset time (unix timestamp or delta seconds)
+        for name in ("RateLimit-Reset", "X-RateLimit-Reset", "X-Rate-Limit-Reset"):
+            rst = headers.get(name)
+            if rst is not None:
+                try:
+                    reset_val = float(rst)
+                    now = time.time()
+                    # Large value = absolute unix timestamp; small = delta
+                    self._rate_limit_reset = reset_val if reset_val > now + 100 else now + reset_val
+                    break
+                except (ValueError, TypeError):
+                    continue
+
     async def _execute_single(self, test: TestCase) -> TestResult:
         """Execute a single test case, respecting all safety rules."""
         # Work on a copy so we can safely apply auth without mutating the original
@@ -157,12 +201,26 @@ class TestExecutor:
                 result.findings = ["Test case generated"]
             return result
 
-        # Real execution with rate limiting
+        # Real execution with rate limiting + dynamic header backoff
         async with self._lock:
             now = time.time()
-            delay = (1.0 / self.rate_limit_rps) - (now - self._last_request_time)
-            if delay > 0:
-                await asyncio.sleep(delay)
+            # Baseline RPS delay
+            delay = max(0.0, (1.0 / self.rate_limit_rps) - (now - self._last_request_time))
+            backoff = 0.0
+            if self.auto_detect_rate_limits:
+                if self._retry_after > 0.0:
+                    backoff = max(backoff, self._retry_after)
+                    self._retry_after = 0.0
+                if (
+                    self._rate_limit_remaining is not None
+                    and self._rate_limit_remaining < 3
+                    and self._rate_limit_reset is not None
+                    and self._rate_limit_reset > now
+                ):
+                    backoff = max(backoff, self._rate_limit_reset - now)
+            total_delay = delay + backoff
+            if total_delay > 0.0:
+                await asyncio.sleep(min(total_delay, 30.0))  # safety cap
             self._last_request_time = time.time()
 
         async with self._semaphore:
@@ -187,6 +245,9 @@ class TestExecutor:
                     result.status_code = response.status_code
                     result.response_time = round(time.time() - start_time, 3)
                     result.response_body = response.text[:1000]  # limit size for storage
+
+                    if self.auto_detect_rate_limits:
+                        self._update_rate_limits_from_headers(response.headers)
 
                     # Basic risk scoring based on response
                     if response.status_code >= 500:

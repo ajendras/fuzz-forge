@@ -91,6 +91,13 @@ def cli_scan(
         Optional[Path],
         typer.Option("--output", "-o", help="Directory for reports and repro files"),
     ] = None,
+    auto_rate: Annotated[
+        bool,
+        typer.Option(
+            "--auto-rate/--no-auto-rate",
+            help="Auto-detect and respect rate-limit headers",
+        ),
+    ] = True,
 ) -> None:
     """Parse an OpenAPI spec, generate LLM-driven security tests, and run them.
 
@@ -106,6 +113,7 @@ def cli_scan(
     console.print(f"🧠 Model          : [bold]{model}[/bold]", style="#ff0044")
     console.print(f"🎯 Limit          : [bold]{limit}[/bold]", style="#ff0044")
     console.print(f"🛡️  Dry run        : [bold]{dry_run}[/bold]", style="#ff0044")
+    console.print(f"📉 Auto rate limit: [bold]{auto_rate}[/bold]", style="#ff0044")
 
     mutator_list: Optional[List[str]] = None
     if mutators:
@@ -121,6 +129,7 @@ def cli_scan(
             mutators=mutator_list,
             dry_run=dry_run,
             output_dir=output_dir,
+            auto_detect_rate_limits=auto_rate,
         )
 
         console.print("\n", style="bold #ffff00")
@@ -202,6 +211,7 @@ model = "llama3.2"
 limit = 20
 dry_run = true
 rate_limit_rps = 5
+auto_detect_rate_limits = true
 allowed_hosts = ["localhost", "127.0.0.1", "example.com"]
 
 enabled_mutators = [

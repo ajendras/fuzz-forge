@@ -31,6 +31,7 @@ def scan(
     output_dir: Optional[str] = "fuzz-reports",
     api_key: Optional[str] = None,
     bearer_token: Optional[str] = None,
+    auto_detect_rate_limits: bool = True,
 ) -> List[TestResult]:
     """High-level convenience function to scan an OpenAPI or GraphQL spec.
 
@@ -57,6 +58,8 @@ def scan(
             files will be written.
         api_key: API key for schemes of type apiKey.
         bearer_token: Token for OAuth2 or Bearer schemes.
+        auto_detect_rate_limits: Whether to parse rate-limit headers and
+            dynamically back off.
 
     Returns:
         List of executed TestResult objects with risk scoring and
@@ -79,6 +82,7 @@ def scan(
         output_dir=output_dir,
         api_key=api_key,
         bearer_token=bearer_token,
+        auto_detect_rate_limits=auto_detect_rate_limits,
     )
 
     forge.from_spec(spec_path)

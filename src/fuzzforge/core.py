@@ -120,6 +120,7 @@ class FuzzForge:
         allowed_hosts: Optional[List[str]] = None,
         api_key: Optional[str] = None,
         bearer_token: Optional[str] = None,
+        auto_detect_rate_limits: bool = True,
     ) -> None:
         """Initialize with safe, production-ready defaults.
 
@@ -130,8 +131,10 @@ class FuzzForge:
             output_dir: Directory for reports and repro artifacts.
             rate_limit_rps: Maximum requests per second (enforced by executor).
             allowed_hosts: Hostnames allowed for real HTTP execution.
-            api_key: Credential for apiKey security schemes.
+            api_key: Credential for apiKey schemes.
             bearer_token: Credential for OAuth2 / Bearer schemes.
+            auto_detect_rate_limits: Whether to parse rate-limit headers and
+                dynamically back off.
 
         Raises:
             ValueError: On invalid configuration values.
@@ -149,6 +152,7 @@ class FuzzForge:
         self.allowed_hosts = allowed_hosts or ["localhost", "127.0.0.1", "example.com"]
         self.api_key = api_key
         self.bearer_token = bearer_token
+        self.auto_detect_rate_limits = bool(auto_detect_rate_limits)
         self.spec: Optional[APISpec] = None
         self._test_cases: List[TestCase] = []
 
@@ -291,6 +295,7 @@ class FuzzForge:
             security_schemes=self.spec.security_schemes if self.spec is not None else {},
             api_key=self.api_key,
             bearer_token=self.bearer_token,
+            auto_detect_rate_limits=self.auto_detect_rate_limits,
         )
         results = executor.run_all(tests)
 
