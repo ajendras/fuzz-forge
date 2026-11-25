@@ -235,7 +235,7 @@ Output ONLY the JSON array. No extra text.
                         method="POST",
                         path="/graphql",
                         payload={
-                            "query": f'mutation {{ testMutation{i+1}(input: {{"malicious": "<script>alert(1)</script>"}}}) {{ id }} }}'
+                            "query": f'mutation {{ testMutation{i+1}(input: {{"malicious": "<script>alert(1)</script>"}}) {{ id }} }}'
                         },
                         headers={"Content-Type": "application/json"},
                         tags=["graphql", "mutation", "xss", "fallback"],
